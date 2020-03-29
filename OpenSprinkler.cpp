@@ -638,12 +638,17 @@ void OpenSprinkler::begin() {
 #if defined(ESP8266)
 
 	/* check hardware type */
-	if(detect_i2c(ACDR_I2CADDR)) hw_type = HW_TYPE_AC;
+	//if(detect_i2c(ACDR_I2CADDR)) hw_type = HW_TYPE_AC;
+  if (1) {hw_type = HW_TYPE_AC;
+  Serial.println("");
+  Serial.println("hw_type = HW_TYPE_AC");}
 	else if(detect_i2c(DCDR_I2CADDR)) hw_type = HW_TYPE_DC;
 	else if(detect_i2c(LADR_I2CADDR)) hw_type = HW_TYPE_LATCH;
 	
 	/* detect hardware revision type */
-	if(detect_i2c(MAIN_I2CADDR)) {	// check if main PCF8574 exists
+	//if(detect_i2c(MAIN_I2CADDR)) {	// check if main PCF8574 exists
+  if(1) {  // check if main PCF8574 exists
+    Serial.println("revision 0 pins assigned");
 		/* assign revision 0 pins */
 		PIN_BUTTON_1 = V0_PIN_BUTTON_1;
 		PIN_BUTTON_2 = V0_PIN_BUTTON_2;
@@ -2495,6 +2500,12 @@ void OpenSprinkler::lcd_set_brightness(byte value) {
 void OpenSprinkler::flash_screen() {
 	lcd.setCursor(0, -1);
 	lcd.print(F(" OpenSprinkler"));
+	lcd.drawXbm(34, 24, WiFi_Logo_width, WiFi_Logo_height, (const byte*) WiFi_Logo_image);
+	lcd.setCursor(0, 2);	
+	lcd.display();
+	delay(1500);
+	lcd.setCursor(0, -1);
+	lcd.print(F(" X-Core Hunter"));
 	lcd.drawXbm(34, 24, WiFi_Logo_width, WiFi_Logo_height, (const byte*) WiFi_Logo_image);
 	lcd.setCursor(0, 2);	
 	lcd.display();

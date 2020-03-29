@@ -27,6 +27,7 @@
 #include "program.h"
 #include "weather.h"
 #include "server.h"
+#include "hunter.h"
 
 #if defined(ARDUINO)
 	EthernetServer *m_server = NULL;
@@ -771,6 +772,7 @@ void do_loop()
 
 							//turn_on_station(sid);
 							os.set_station_bit(sid, 1);
+              HunterStart(sid+1,round((q->dur/60)+0.5)); // Starts X-Core Hunter zone for 'dur' minutes +1
 
 							// RAH implementation of flow sensor
 							flow_start=0;
@@ -1014,6 +1016,7 @@ void check_weather() {
  */
 void turn_off_station(byte sid, ulong curr_time) {
 	os.set_station_bit(sid, 0);
+  HunterStop(sid+1); // Stops X-Core Hunter zones
 
 	byte qid = pd.station_qid[sid];
 	// ignore if we are turning off a station that's not running or scheduled to run

@@ -1112,9 +1112,10 @@ void server_view_scripturl() {
 void server_json_controller_main() {
 	byte bid, sid;
 	ulong curr_time = os.now_tz();
-	bfill.emit_p(PSTR("\"devt\":$L,\"nbrd\":$D,\"en\":$D,\"sn1\":$D,\"sn2\":$D,\"rd\":$D,\"rdst\":$L,"
+	bfill.emit_p(PSTR("\"hunter_p\":$D,\"devt\":$L,\"nbrd\":$D,\"en\":$D,\"sn1\":$D,\"sn2\":$D,\"rd\":$D,\"rdst\":$L," // 3B
 										"\"sunrise\":$D,\"sunset\":$D,\"eip\":$L,\"lwc\":$L,\"lswc\":$L,"
 										"\"lupt\":$L,\"lrbtc\":$D,\"lrun\":[$D,$D,$D,$L],"),
+							os.status.hunter_p, // 3B
 							curr_time,
 							os.nboards,
 							os.status.enabled,
@@ -2304,5 +2305,3 @@ ulong getNtpTime()
 	return 0;
 }
 #endif
-
-

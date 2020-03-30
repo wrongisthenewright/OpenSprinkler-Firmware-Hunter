@@ -644,6 +644,25 @@ void do_loop()
 		}
 		os.old_status.sensor2_active = os.status.sensor2_active;			
 
+    // ====== Check hunter_p sensor status ====== 3B
+    if (os.read_current() > 3000) {
+      os.status.hunter_p = 1;
+    } else {
+      os.status.hunter_p = 0;
+    }
+      if (os.old_status.hunter_p != os.status.hunter_p) {
+        if (curr_time>os.hunter_p_active_lasttime+5) {   // add a 5 second delay on status change
+          if (os.status.hunter_p) {
+            // hunter_p sensor on
+            os.hunter_p_active_lasttime = curr_time;
+          } else {
+            // hunter_p sensor off
+            os.hunter_p_active_lasttime = curr_time;
+            }
+        }
+        os.old_status.hunter_p = os.status.hunter_p;
+      }
+      
 		// ===== Check program switch status =====
 		byte pswitch = os.detect_programswitch_status(curr_time);
 		if(pswitch > 0) {
@@ -902,10 +921,12 @@ void do_loop()
 				os.lcd.setCursor(0, 2);
 				os.lcd.clear(2, 2);
 				if(os.status.program_busy) {
-					os.lcd.print(F("curr: "));
+					//os.lcd.print(F("curr: "));
+          os.lcd.print(F("A0: ")); // 3B => show mV on A0 from hunter P pin
 					uint16_t curr = os.read_current();
 					os.lcd.print(curr);
-					os.lcd.print(F(" mA"));
+					//os.lcd.print(F(" mA"));
+          os.lcd.print(F(" mV")); // 3B => show mV on A0 from hunter P pin
 				}
 			}
 			#endif

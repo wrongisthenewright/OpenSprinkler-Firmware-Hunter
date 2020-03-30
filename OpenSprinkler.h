@@ -118,6 +118,7 @@ struct ConStatus {
 	byte enabled:1;						// operation enable (when set, controller operation is enabled)
 	byte rain_delayed:1;			// rain delay bit (when set, rain delay is applied)
 	byte sensor1:1;						// sensor1 status bit (when set, sensor1 on is detected)
+  byte hunter_p:1;          // hunter P pin activate (when set, it indicates that one station zone is running) // 3B
 	byte program_busy:1;			// HIGH means a program is being executed currently
 	byte has_curr_sense:1;		// HIGH means the controller has a current sensing pin
 	byte safe_reboot:1;				// HIGH means a safe reboot has been marked
@@ -179,7 +180,8 @@ public:
 	static ulong sensor1_active_lasttime; // most recent time sensor1 is activated
 	static ulong sensor2_on_timer;	// time when sensor2 is detected on last time
 	static ulong sensor2_off_timer; // time when sensor2 is detected off last time
-	static ulong sensor2_active_lasttime; // most recent time sensor1 is activated	
+	static ulong sensor2_active_lasttime; // most recent time sensor1 is activated
+  static ulong hunter_p_active_lasttime; // most recent time hunter_p is activated	// 3B
 	static ulong raindelay_on_lasttime;  // time when the most recent rain delay started
 	static ulong flowcount_rt;		 // flow count (for computing real-time flow rate)
 	static ulong flowcount_log_start; // starting flow count (for logging)
@@ -235,6 +237,7 @@ public:
 	static void raindelay_start();	// start raindelay
 	static void raindelay_stop();		// stop rain delay
 	static void detect_binarysensor_status(ulong);// update binary (rain, soil) sensor status
+  static void hunter_p_status();  // update hunter_p status 3B
 	static byte detect_programswitch_status(ulong); // get program switch status
 	static void sensor_resetall();
 	

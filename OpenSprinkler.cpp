@@ -46,6 +46,7 @@ ulong OpenSprinkler::sensor2_on_timer;
 ulong OpenSprinkler::sensor2_off_timer;
 ulong OpenSprinkler::sensor2_active_lasttime;
 ulong OpenSprinkler::raindelay_on_lasttime;
+ulong OpenSprinkler::hunter_p_active_lasttime; // 3B
 
 ulong OpenSprinkler::flowcount_log_start;
 ulong OpenSprinkler::flowcount_rt;
@@ -409,15 +410,15 @@ const char *OpenSprinkler::sopts[] = {
 };
 
 /** Weekday strings (stored in PROGMEM to reduce RAM usage) */
-static const char days_str[] PROGMEM =
-	"Mon\0"
-	"Tue\0"
-	"Wed\0"
-	"Thu\0"
-	"Fri\0"
-	"Sat\0"
-	"Sun\0";
-
+static const char days_str[] PROGMEM = // 3A
+	"Lun\0"
+	"Mar\0"
+	"Mer\0"
+	"Jeu\0"
+	"Ven\0"
+	"Sam\0"
+	"Dim\0";
+  
 /** Calculate local time (UTC time plus time zone offset) */
 time_t OpenSprinkler::now_tz() {
 	return now()+(int32_t)3600/4*(int32_t)(iopts[IOPT_TIMEZONE]-48);
@@ -1198,6 +1199,7 @@ void OpenSprinkler::sensor_resetall() {
 	sensor2_on_timer = 0;
 	sensor2_off_timer = 0;
 	sensor2_active_lasttime = 0;
+  hunter_p_active_lasttime = 0; // 3B
 	old_status.sensor1_active = status.sensor1_active = 0;
 	old_status.sensor2_active = status.sensor2_active = 0;
 }
@@ -1223,7 +1225,8 @@ uint16_t OpenSprinkler::read_current() {
 			#endif
 		} else if (hw_type == HW_TYPE_AC) {
 			#if defined(ESP8266)
-			scale = 3.45;
+			//scale = 3.45;
+      scale = 3.242; // 3B => show mV on A0 from hunter P pin
 			#else
 			scale = 11.39;
 			#endif		 
@@ -2104,7 +2107,7 @@ void OpenSprinkler::lcd_print_2digit(int v)
 }
 
 /** print time to a given line */
-void OpenSprinkler::lcd_print_time(time_t t)
+void OpenSprinkler::lcd_print_time(time_t t) // 3A
 {
 	lcd.setCursor(0, 0);
 	lcd_print_2digit(hour(t));
@@ -2114,9 +2117,9 @@ void OpenSprinkler::lcd_print_time(time_t t)
 	// each weekday string has 3 characters + ending 0
 	lcd_print_pgm(days_str+4*weekday_today());
 	lcd_print_pgm(PSTR(" "));
-	lcd_print_2digit(month(t));
-	lcd_print_pgm(PSTR("-"));
 	lcd_print_2digit(day(t));
+	lcd_print_pgm(PSTR("/"));
+	lcd_print_2digit(month(t));
 }
 
 /** print ip address */

@@ -33,7 +33,6 @@
 
 		#include <FS.h>
 		#include "espconnect.h"
-		#define INSERT_DELAY(x) {}
 	 
 		extern ESP8266WebServer *wifi_server;
 		extern EthernetServer *m_server;
@@ -47,7 +46,6 @@
 		extern SdFat sd;
 		extern EthernetClient *m_client;
 		#define handle_return(x) {return_code=x; return;}
-		#define INSERT_DELAY(x) {}
 	#endif
 
 #else
@@ -58,7 +56,6 @@
 
 	extern EthernetClient *m_client;
 	#define handle_return(x) {return_code=x; return;}
-	#define INSERT_DELAY(x) {}
 
 #endif
 
@@ -268,6 +265,7 @@ byte findKeyVal (const char *str,char *strbuf, uint16_t maxlen,const char *key,b
 
 void rewind_ether_buffer() {
 	bfill = ether_buffer;
+	ether_buffer[0] = 0;
 }
 
 void send_packet(bool final=false) {
@@ -524,7 +522,6 @@ void server_json_stations_main() {
 		}
 	}
 	bfill.emit_p(PSTR("],\"maxlen\":$D}"), STATION_NAME_SIZE);
-	INSERT_DELAY(1);
 }
 
 /** Output stations data */
@@ -559,7 +556,6 @@ void server_json_station_special() {
 		}
 	}
 	bfill.emit_p(PSTR("}"));
-	INSERT_DELAY(1);
 	handle_return(HTML_OK);
 }
 
@@ -1028,7 +1024,6 @@ void server_json_options_main() {
 	}
 
 	bfill.emit_p(PSTR(",\"dexp\":$D,\"mexp\":$D,\"hwt\":$D}"), os.detect_exp(), MAX_EXT_BOARDS, os.hw_type);
-	INSERT_DELAY(1);
 }
 
 /** Output Options */
@@ -1082,7 +1077,6 @@ void server_json_programs_main() {
 		}
 	}
 	bfill.emit_p(PSTR("]}"));
-	INSERT_DELAY(1);
 }
 
 /** Output program data */
@@ -1186,7 +1180,6 @@ void server_json_controller_main() {
 	//bfill.emit_p(PSTR(",\"mqtt\":\"$O\""), SOPT_MQTT_IP);
 	
 	bfill.emit_p(PSTR("}"));
-	INSERT_DELAY(1);
 }
 
 /** Output controller variables in json */
@@ -1547,7 +1540,6 @@ void server_json_status_main() {
 		if(sid!=os.nstations-1) bfill.emit_p(PSTR(","));
 	}
 	bfill.emit_p(PSTR("],\"nstations\":$D}"), os.nstations);
-	INSERT_DELAY(1);
 }
 
 /** Output station status */
@@ -1792,12 +1784,7 @@ void server_json_log() {
 	}
 
 	bfill.emit_p(PSTR("]"));
-	INSERT_DELAY(1);
-#if defined(ESP8266)
-	send_packet(true);
-#else
 	handle_return(HTML_OK);
-#endif
 }
 /**
  * Delete log
@@ -1848,7 +1835,6 @@ void server_json_all() {
 	bfill.emit_p(PSTR(",\"stations\":{"));
 	server_json_stations_main();
 	bfill.emit_p(PSTR("}"));
-	INSERT_DELAY(1);
 	handle_return(HTML_OK);
 }
 
@@ -1874,7 +1860,7 @@ void server_json_debug() {
   (uint16_t)freeHeap());
   bfill.emit_p(PSTR("}"));
   #endif
-  handle_return(HTML_OK);	
+  handle_return(HTML_OK);
 }
 #endif
 
@@ -2201,6 +2187,7 @@ ulong getNtpTime()
 			if (!os.iopts[IOPT_NTP_IP1] || os.iopts[IOPT_NTP_IP1] == '0')
 				strcpy(_ntpip, "pool.ntp.org");
 
+			DEBUG_PRINTLN(_ntpip);
 			ntp = new NTPClient(udp, _ntpip);
 			ntp->begin();
 			delay(1000);
@@ -2237,7 +2224,11 @@ ulong getNtpTime()
 		ntpip+=".";
 		ntpip+=os.iopts[IOPT_NTP_IP4];
 		
-		configTime(0, 0, "pool.ntp.org", ntpip.c_str(), "time.nist.gov");
+		strcpy(_ntpip, ntpip.c_str());
+		if (!os.iopts[IOPT_NTP_IP1] || os.iopts[IOPT_NTP_IP1] == '0')
+				strcpy(_ntpip, "pool.ntp.org");
+		DEBUG_PRINTLN(_ntpip);
+		configTime(0, 0, _ntpip, "time.nist.gov");
 		delay(1000);
 		configured = true;
 	}
@@ -2280,7 +2271,14 @@ ulong getNtpTime()
 		packetBuffer[15]	= 52;
 		// all NTP fields have been given values, now
 		// you can send a packet requesting a timestamp:
-		Udp->beginPacket(ntpip, 123); // NTP requests are to port 123
+		if (!os.iopts[IOPT_NTP_IP1] || os.iopts[IOPT_NTP_IP1] == '0') {
+			DEBUG_PRINTLN(F("using pool.ntp"));
+			Udp->beginPacket("pool.ntp.org", 123); // NTP requests are to port 123
+		} else {
+			DEBUG_PRINTLN(ntpip[0]);
+			Udp->beginPacket(ntpip, 123);
+			
+		}
 		Udp->write(packetBuffer, NTP_PACKET_SIZE);
 		Udp->endPacket();
 		// end of sendNtpPacket
@@ -2300,7 +2298,7 @@ ulong getNtpTime()
 			return secsSince1900 - seventyYears;
 		}
 		tick ++;
-	} while(tick<20);
+	} while(tick<5);
 #endif
 	return 0;
 }

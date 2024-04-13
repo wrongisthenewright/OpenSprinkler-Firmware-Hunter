@@ -1,3 +1,10 @@
+Clone repo of (old) version OpenSprinkler adapted for interfacing Hunter(R) watering systems. 
+The mods in this fork are my reactions to error in bulding the firmware from Seb821 work.
+I'm a dumb developer so error compiling this code are all my own contribution :)
+
+I've addedd platform.io config file for wemos D1 mini.
+
+
 ============================================
 ==== OpenSprinkler AVR/RPI/BBB Firmware ====
 ============================================

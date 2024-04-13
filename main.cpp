@@ -47,8 +47,8 @@
 
 void reset_all_stations();
 void reset_all_stations_immediate();
-void push_message(byte type, uint32_t lval=0, float fval=0.f);
-void manual_start_program(byte, byte);
+void push_message(uint8_t type, uint32_t lval=0, float fval=0.f);
+void manual_start_program(uint8_t, uint8_t);
 void remote_http_callback(char*);
 
 // Small variations have been added to the timing values below
@@ -77,14 +77,14 @@ ProgramData pd;		// ProgramdData object
  * flow_last_gpm - last flow rate measured (averaged over flow_gallons) from last valve stopped (used to write to log file). */
 ulong flow_begin, flow_start, flow_stop, flow_gallons;
 ulong flow_count = 0;
-byte prev_flow_state = HIGH;
+uint8_t prev_flow_state = HIGH;
 float flow_last_gpm=0;
 
 void flow_poll() {
 	#if defined(ESP8266)
 	pinModeExt(PIN_SENSOR1, INPUT_PULLUP); // this seems necessary for OS 3.2 
 	#endif
-	byte curr_flow_state = digitalReadExt(PIN_SENSOR1);
+	uint8_t curr_flow_state = digitalReadExt(PIN_SENSOR1);
 	if(!(prev_flow_state==HIGH && curr_flow_state==LOW)) {	// only record on falling edge
 		prev_flow_state = curr_flow_state;
 		return;
@@ -111,13 +111,13 @@ static char ui_anim_chars[3] = {'.', 'o', 'O'};
 #define UI_STATE_DISP_GW	 2
 #define UI_STATE_RUNPROG	 3
 
-static byte ui_state = UI_STATE_DEFAULT;
-static byte ui_state_runprog = 0;
+static uint8_t ui_state = UI_STATE_DEFAULT;
+static uint8_t ui_state_runprog = 0;
 
 bool ui_confirm(PGM_P str) {
 	os.lcd_print_line_clear_pgm(str, 0);
 	os.lcd_print_line_clear_pgm(PSTR("(B1:No, B3:Yes)"), 1);
-	byte button;
+	uint8_t button;
 	ulong timeout = millis()+4000;
 	do {
 		button = os.button_read(BUTTON_WAIT_NONE);
@@ -147,7 +147,7 @@ void ui_state_machine() {
 	}
 
 	// read button, if something is pressed, wait till release
-	byte button = os.button_read(BUTTON_WAIT_HOLD);
+	uint8_t button = os.button_read(BUTTON_WAIT_HOLD);
 
 	if (button & BUTTON_FLAG_DOWN) {	 // repond only to button down events
 		os.button_timeout = LCD_BACKLIGHT_TIMEOUT;
@@ -198,7 +198,7 @@ void ui_state_machine() {
 		case BUTTON_2:
 			if (button & BUTTON_FLAG_HOLD) {	// holding B2
 				if (digitalReadExt(PIN_BUTTON_1)==0) { // if B1 is pressed while holding B2, display external IP
-					os.lcd_print_ip((byte*)(&os.nvdata.external_ip), 1);
+					os.lcd_print_ip((uint8_t*)(&os.nvdata.external_ip), 1);
 					os.lcd.setCursor(0, 1);
 					os.lcd_print_pgm(PSTR("(eip)"));
 					ui_state = UI_STATE_DISP_IP;
@@ -214,7 +214,7 @@ void ui_state_machine() {
 				}
 			} else {	// clicking B2: display MAC
 				os.lcd.clear(0, 1);
-				byte mac[6];
+				uint8_t mac[6];
 				#if defined(ESP8266)
 				os.load_hardware_mac(mac, m_server!=NULL);
 				#else
@@ -332,7 +332,7 @@ void do_setup() {
 void(* sysReset) (void) = 0;
 
 #if !defined(ESP8266)
-volatile byte wdt_timeout = 0;
+volatile uint8_t wdt_timeout = 0;
 /** WDT interrupt service routine */
 ISR(WDT_vect)
 {
@@ -365,9 +365,9 @@ void do_setup() {
 }
 #endif
 
-void write_log(byte type, ulong curr_time);
+void write_log(uint8_t type, ulong curr_time);
 void schedule_all_stations(ulong curr_time);
-void turn_off_station(byte sid, ulong curr_time);
+void turn_off_station(uint8_t sid, ulong curr_time);
 void process_dynamic_events(ulong curr_time);
 void check_network();
 void check_weather();
@@ -398,7 +398,7 @@ void do_loop()
 	static ulong last_time = 0;
 	static ulong last_minute = 0;
 
-	byte bid, sid, s, pid, qid, bitvalue;
+	uint8_t bid, sid, s, pid, qid, bitvalue;
 	ProgramStruct prog;
 
 	os.status.mas = os.iopts[IOPT_MASTER_STATION];
@@ -687,7 +687,7 @@ void do_loop()
       }
       
 		// ===== Check program switch status =====
-		byte pswitch = os.detect_programswitch_status(curr_time);
+		uint8_t pswitch = os.detect_programswitch_status(curr_time);
 		if(pswitch > 0) {
 			reset_all_stations_immediate(); // immediately stop all stations
 		}
@@ -727,7 +727,7 @@ void do_loop()
 							ulong water_time = water_time_resolve(prog.durations[sid]);
 							// if the program is set to use weather scaling
 							if (prog.use_weather) {
-								byte wl = os.iopts[IOPT_WATER_PERCENTAGE];
+								uint8_t wl = os.iopts[IOPT_WATER_PERCENTAGE];
 								water_time = water_time * wl / 100;
 								if (wl < 20 && water_time < 10) // if water_percentage is less than 20% and water_time is less than 10 seconds
 																								// do not water
@@ -782,7 +782,7 @@ void do_loop()
 			qid=0;
 			for(;q<pd.queue+pd.nqueue;q++,qid++) {
 				sid=q->sid;
-				byte sqi=pd.station_qid[sid];
+				uint8_t sqi=pd.station_qid[sid];
 				// skip if station is already assigned a queue element
 				// and that queue element has an earlier start time
 				if(sqi<255 && pd.queue[sqi].st<q->st) continue;
@@ -793,7 +793,7 @@ void do_loop()
 			for(bid=0;bid<os.nboards; bid++) {
 				bitvalue = os.station_bits[bid];
 				for(s=0;s<8;s++) {
-					byte sid = bid*8+s;
+					uint8_t sid = bid*8+s;
 
 					// skip master station
 					if (os.status.mas == sid+1) continue;
@@ -842,7 +842,7 @@ void do_loop()
 			// check through runtime queue, calculate the last stop time of sequential stations
 			pd.last_seq_stop_time = 0;
 			ulong sst;
-			byte re=os.iopts[IOPT_REMOTE_EXT_MODE];
+			uint8_t re=os.iopts[IOPT_REMOTE_EXT_MODE];
 			q = pd.queue;
 			for(;q<pd.queue+pd.nqueue;q++) {
 				sid = q->sid;
@@ -885,7 +885,7 @@ void do_loop()
 		if (os.status.mas>0) {
 			int16_t mas_on_adj = water_time_decode_signed(os.iopts[IOPT_MASTER_ON_ADJ]);
 			int16_t mas_off_adj= water_time_decode_signed(os.iopts[IOPT_MASTER_OFF_ADJ]);
-			byte masbit = 0;
+			uint8_t masbit = 0;
 			
 			for(sid=0;sid<os.nstations;sid++) {
 				// skip if this is the master station
@@ -909,7 +909,7 @@ void do_loop()
 		if (os.status.mas2>0) {
 			int16_t mas_on_adj_2 = water_time_decode_signed(os.iopts[IOPT_MASTER_ON_ADJ_2]);
 			int16_t mas_off_adj_2= water_time_decode_signed(os.iopts[IOPT_MASTER_OFF_ADJ_2]);
-			byte masbit2 = 0;
+			uint8_t masbit2 = 0;
 			for(sid=0;sid<os.nstations;sid++) {
 				// skip if this is the master station
 				if (os.status.mas2 == sid+1) continue;
@@ -998,7 +998,7 @@ void do_loop()
 		// check weather
 		check_weather();
 
-		byte wuf = os.weather_update_flag;
+		uint8_t wuf = os.weather_update_flag;
 		if(wuf) {
 			if((wuf&WEATHER_UPDATE_EIP) | (wuf&WEATHER_UPDATE_WL)) {
 				// at the moment, we only send notification if water level or external IP changed
@@ -1008,7 +1008,7 @@ void do_loop()
 			}
 			os.weather_update_flag = 0;
 		}
-		static byte reboot_notification = 1;
+		static uint8_t reboot_notification = 1;
 		if(reboot_notification) {
 			reboot_notification = 0;
 			push_message(IFTTT_REBOOT);
@@ -1058,11 +1058,11 @@ void check_weather() {
  * This function turns off a scheduled station
  * and writes log record
  */
-void turn_off_station(byte sid, ulong curr_time) {
+void turn_off_station(uint8_t sid, ulong curr_time) {
 	os.set_station_bit(sid, 0);
   HunterStop(sid+1); // Stops X-Core Hunter zones
 
-	byte qid = pd.station_qid[sid];
+	uint8_t qid = pd.station_qid[sid];
 	// ignore if we are turning off a station that's not running or scheduled to run
 	if (qid>=pd.nqueue)  return;
 
@@ -1116,7 +1116,7 @@ void process_dynamic_events(ulong curr_time) {
 		sn2 = true;
 
 	// todo: handle sensor 2
-	byte sid, s, bid, qid, igs, igs2, igrd;
+	uint8_t sid, s, bid, qid, igs, igs2, igrd;
 	for(bid=0;bid<os.nboards;bid++) {
 		igs = os.attrib_igs[bid];
 		igs2= os.attrib_igs2[bid];
@@ -1161,14 +1161,14 @@ void schedule_all_stations(ulong curr_time) {
 	}
 
 	RuntimeQueueStruct *q = pd.queue;
-	byte re = os.iopts[IOPT_REMOTE_EXT_MODE];
+	uint8_t re = os.iopts[IOPT_REMOTE_EXT_MODE];
 	// go through runtime queue and calculate start time of each station
 	for(;q<pd.queue+pd.nqueue;q++) {
 		if(q->st) continue; // if this queue element has already been scheduled, skip
 		if(!q->dur) continue; // if the element has been marked to reset, skip
-		byte sid=q->sid;
-		byte bid=sid>>3;
-		byte s=sid&0x07;
+		uint8_t sid=q->sid;
+		uint8_t bid=sid>>3;
+		uint8_t s=sid&0x07;
 
 		// if this is a sequential station and the controller is not in remote extension mode
 		// use sequential scheduling. station delay time apples
@@ -1231,12 +1231,12 @@ void reset_all_stations() {
  * If pid==255, this is a short test program (2 second per station)
  * If pid > 0. run program pid-1
  */
-void manual_start_program(byte pid, byte uwt) {
+void manual_start_program(uint8_t pid, uint8_t uwt) {
 	boolean match_found = false;
 	reset_all_stations_immediate();
 	ProgramStruct prog;
 	ulong dur;
-	byte sid, bid, s;
+	uint8_t sid, bid, s;
 	if ((pid>0)&&(pid<255)) {
 		pd.read(pid-1, &prog);
 		push_message(IFTTT_PROGRAM_SCHED, pid-1, uwt?os.iopts[IOPT_WATER_PERCENTAGE]:100);
@@ -1273,14 +1273,14 @@ void manual_start_program(byte pid, byte uwt) {
 // ==========================================
 // ====== PUSH NOTIFICATION FUNCTIONS =======
 // ==========================================
-void ip2string(char* str, byte ip[4]) {
-	for(byte i=0;i<4;i++) {
+void ip2string(char* str, uint8_t ip[4]) {
+	for(uint8_t i=0;i<4;i++) {
 		itoa(ip[i], str+strlen(str), 10);
 		if(i!=3) strcat(str, ".");
 	}
 }
 
-void push_message(byte type, uint32_t lval, float fval) {
+void push_message(uint8_t type, uint32_t lval, float fval) {
 
 	static const char* host = DEFAULT_IFTTT_URL;
 	// prepare post message in tmp_buffer
@@ -1361,10 +1361,10 @@ void push_message(byte type, uint32_t lval, float fval) {
 		case IFTTT_WEATHER_UPDATE:
 			if(lval>0) {
 				strcat_P(postval, PSTR("External IP updated: "));
-				byte ip[4] = {(byte)((lval>>24)&0xFF),
-											(byte)((lval>>16)&0xFF),
-											(byte)((lval>>8)&0xFF),
-											(byte)(lval&0xFF)};
+				uint8_t ip[4] = {(uint8_t)((lval>>24)&0xFF),
+											(uint8_t)((lval>>16)&0xFF),
+											(uint8_t)((lval>>8)&0xFF),
+											(uint8_t)(lval&0xFF)};
 				ip2string(postval, ip);
 			}
 			if(fval>=0) {
@@ -1386,7 +1386,7 @@ void push_message(byte type, uint32_t lval, float fval) {
 					} else {
 						_ip = WiFi.localIP();
 					}
-					byte ip[4] = {_ip[0], _ip[1], _ip[2], _ip[3]};
+					uint8_t ip[4] = {_ip[0], _ip[1], _ip[2], _ip[3]};
 					ip2string(postval, ip);
 				}
 				#else
@@ -1453,7 +1453,7 @@ static const char log_type_names[] PROGMEM =
 	"cu\0";
 
 /** write run record to log on SD card */
-void write_log(byte type, ulong curr_time) {
+void write_log(uint8_t type, ulong curr_time) {
 
 	if (!os.iopts[IOPT_ENABLE_LOGGING]) return;
 
@@ -1558,7 +1558,7 @@ void write_log(byte type, ulong curr_time) {
 
 #if defined(ARDUINO)
 	#if defined(ESP8266)
-	file.write((byte*)tmp_buffer, strlen(tmp_buffer));
+	file.write((uint8_t*)tmp_buffer, strlen(tmp_buffer));
 	#else
 	file.write(tmp_buffer);
 	#endif

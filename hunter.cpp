@@ -9,7 +9,7 @@
 // val - value to write
 // len - len in bits of the value
 /////////////////////////////////////////////////////////////////////////////
-void HunterBitfield(vector <byte>& bits, byte pos, byte val, byte len)
+void HunterBitfield(vector <uint8_t>& bits, uint8_t pos, uint8_t val, uint8_t len)
 {
 while (len > 0)
 {
@@ -59,7 +59,7 @@ delayMicroseconds(SHORT_INTERVAL); //microseconds
 // Arguments: buffer - blob containing the bits to transmit
 // extrabit - if true, then write an extra 1 bit
 /////////////////////////////////////////////////////////////////////////////
-void HunterWrite(vector<byte> buffer, bool extrabit)
+void HunterWrite(vector<uint8_t> buffer, bool extrabit)
 {
 // Bus start sequence
 //_flexwire.invert(false);
@@ -89,7 +89,7 @@ delayMicroseconds(SHORT_INTERVAL); //microseconds
 //_flexwire.write(buffer);
 for (auto &sendByte : buffer)
 {
-  for (byte inner = 0; inner < 8; inner++)
+  for (uint8_t inner = 0; inner < 8; inner++)
   {
     // Send high order bits first
     if (sendByte & 0x80)
@@ -122,7 +122,7 @@ HunterLow();
 // Arguments: zone - zone number (1-48)
 // time - time in minutes (0-240)
 /////////////////////////////////////////////////////////////////////////////
-void HunterStart(byte zone, byte time)
+void HunterStart(uint8_t zone, uint8_t time)
 {
 DEBUG_PRINT("X-Core Hunter start zone ");
 DEBUG_PRINT(zone);
@@ -131,7 +131,7 @@ DEBUG_PRINT(time);
 DEBUG_PRINTLN(" min");
 
 // Start out with a base frame 
-vector<byte>  buffer = {0xff,0x00,0x00,0x00,0x10,0x00,0x00,0x04,0x00,0x00,0x01,0x00,0x01,0xb8,0x3f};
+vector<uint8_t>  buffer = {0xff,0x00,0x00,0x00,0x10,0x00,0x00,0x04,0x00,0x00,0x01,0x00,0x01,0xb8,0x3f};
 
 if (zone < 1 || zone > 48)
 {
@@ -191,7 +191,7 @@ HunterWrite(buffer, true);
 // Description: Stop all zones
 // Arguments: None
 /////////////////////////////////////////////////////////////////////////////
-void HunterStop(byte zone)
+void HunterStop(uint8_t zone)
 {
 DEBUG_PRINT("X-Core Hunter stop zone ");
 DEBUG_PRINT(zone);
@@ -204,10 +204,10 @@ HunterStart(zone, 0);
 // Description: Run a program
 // Arguments: num - program number (1-4)
 /////////////////////////////////////////////////////////////////////////////
-void HunterProgram(byte num)
+void HunterProgram(uint8_t num)
 {
 // Start with a basic program frame
-vector<byte> buffer = {0xff, 0x40, 0x03, 0x96, 0x09 ,0xbd ,0x7f};
+vector<uint8_t> buffer = {0xff, 0x40, 0x03, 0x96, 0x09 ,0xbd ,0x7f};
 
 if (num < 1 || num > 4)
 {

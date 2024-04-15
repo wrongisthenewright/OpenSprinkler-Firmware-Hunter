@@ -3,6 +3,14 @@ The mods in this fork are my reactions to error in bulding the firmware from Seb
 I'm a dumb developer so error compiling this code are all my own contribution :)
 
 I've addedd platform.io config file for wemos D1 mini.
+The hunter.h contains the reference to the GPIO port used, in this repo I'm using GPIO 16 (D0) 
+just so that the physical wiring is the same of ecodina hunter-wifi esp8266 code that do similar
+things (it supports REST API, that I'm using atm)
+
+
+https://github.com/ecodina/hunter-wifi
+
+
 
 Just a memo for myself, to build and flash the wemos do:
 

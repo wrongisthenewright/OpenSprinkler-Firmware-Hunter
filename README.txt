@@ -4,6 +4,12 @@ I'm a dumb developer so error compiling this code are all my own contribution :)
 
 I've addedd platform.io config file for wemos D1 mini.
 
+Just a memo for myself, to build and flash the wemos do:
+
+sudo chmod 666 /dev/ttyUSB0
+esptool.py --port /dev/ttyUSB0 erase_flash
+pio run -v  -t upload 
+
 
 ============================================
 ==== OpenSprinkler AVR/RPI/BBB Firmware ====

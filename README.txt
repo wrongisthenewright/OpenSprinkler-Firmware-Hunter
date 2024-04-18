@@ -1,4 +1,4 @@
-Clone repo of (old) version OpenSprinkler adapted for interfacing Hunter(R) watering systems. 
+Clone repo of 2.1.9(3) version of OpenSprinkler already adapted by @seb821 for interfacing Hunter(R) watering systems. 
 The mods in this fork are my reactions to error in bulding the firmware from Seb821 work.
 I'm a dumb developer so error compiling this code are all my own contribution :)
 
@@ -10,6 +10,7 @@ things (it supports REST API, that I'm using atm)
 
 https://github.com/ecodina/hunter-wifi
 
+It works correctly with an Hunter X-Core 6 station controller, it should work with any Hunter controller with REM port.
 
 
 Just a memo for myself, to build and flash the wemos do:

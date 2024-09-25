@@ -23,7 +23,7 @@
 
 #include "OpenSprinkler.h"
 #include "utils.h"
-#include "server.h"
+#include "opensprinkler_server.h"
 #include "weather.h"
 
 extern OpenSprinkler os; // OpenSprinkler object

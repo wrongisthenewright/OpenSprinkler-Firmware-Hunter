@@ -29,6 +29,7 @@
 #include "utils.h"
 #include "gpio.h"
 #include "images.h"
+#include "mqtt.h"
 
 #if defined(ARDUINO) // headers for ESP8266
 	#include <Arduino.h>
@@ -42,6 +43,7 @@
 		#include <RCSwitch.h>
 		#include "SSD1306Display.h"
 		#include "espconnect.h"
+		#include "hunter.h"
 	#else
 		#include <SdFat.h>
 		#include "LiquidCrystal.h"
@@ -118,7 +120,6 @@ struct ConStatus {
 	byte enabled:1;						// operation enable (when set, controller operation is enabled)
 	byte rain_delayed:1;			// rain delay bit (when set, rain delay is applied)
 	byte sensor1:1;						// sensor1 status bit (when set, sensor1 on is detected)
-  byte hunter_p:1;          // hunter P pin activate (when set, it indicates that one station zone is running) // 3B
 	byte program_busy:1;			// HIGH means a program is being executed currently
 	byte has_curr_sense:1;		// HIGH means the controller has a current sensing pin
 	byte safe_reboot:1;				// HIGH means a safe reboot has been marked
@@ -131,6 +132,7 @@ struct ConStatus {
 	byte sensor2:1;						// sensor2 status bit (when set, sensor2 on is detected)
 	byte sensor1_active:1;		// sensor1 active bit (when set, sensor1 is activated)
 	byte sensor2_active:1;		// sensor2 active bit (when set, sensor2 is activated)
+	byte req_mqtt_restart:1;			// request mqtt restart
 };
 
 extern const char iopt_json_names[];
@@ -142,6 +144,10 @@ public:
 	// data members
 #if defined(ESP8266)
 	static SSD1306Display lcd;	// 128x64 OLED display
+	#if defined(HUNTER_REM_PIN)
+	static HunterInterface hunter;
+	static uint8_t hunter_runtimes[];
+	#endif
 #elif defined(ARDUINO)
 	static LiquidCrystal lcd; // 16x2 character LCD
 #else
@@ -152,6 +158,8 @@ public:
 	static byte pin_sr_data;		// RPi shift register data pin
 															// to handle RPi rev. 1
 #endif
+
+	static OSMqtt mqtt;
 
 	static NVConData nvdata;
 	static ConStatus status;
@@ -180,8 +188,7 @@ public:
 	static ulong sensor1_active_lasttime; // most recent time sensor1 is activated
 	static ulong sensor2_on_timer;	// time when sensor2 is detected on last time
 	static ulong sensor2_off_timer; // time when sensor2 is detected off last time
-	static ulong sensor2_active_lasttime; // most recent time sensor1 is activated
-  static ulong hunter_p_active_lasttime; // most recent time hunter_p is activated	// 3B
+	static ulong sensor2_active_lasttime; // most recent time sensor1 is activated	
 	static ulong raindelay_on_lasttime;  // time when the most recent rain delay started
 	static ulong flowcount_rt;		 // flow count (for computing real-time flow rate)
 	static ulong flowcount_log_start; // starting flow count (for logging)
@@ -199,9 +206,8 @@ public:
 	static void begin();				// initialization, must call this function before calling other functions
 	static byte start_network();	// initialize network with the given mac and port
 	static byte start_ether();	// initialize ethernet with the given mac and port	
-#if defined(ARDUINO)
+	static bool network_connected();		// check if the network is up
 	static bool load_hardware_mac(byte* buffer, bool wired=false);	// read hardware mac address
-#endif
 	static time_t now_tz();
 	// -- station names and attributes
 	static void get_station_data(byte sid, StationData* data); // get station data
@@ -237,7 +243,6 @@ public:
 	static void raindelay_start();	// start raindelay
 	static void raindelay_stop();		// stop rain delay
 	static void detect_binarysensor_status(ulong);// update binary (rain, soil) sensor status
-  static void hunter_p_status();  // update hunter_p status 3B
 	static byte detect_programswitch_status(ulong); // get program switch status
 	static void sensor_resetall();
 	

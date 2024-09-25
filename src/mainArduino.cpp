@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <Wire.h>
 
 #if defined(ESP8266)

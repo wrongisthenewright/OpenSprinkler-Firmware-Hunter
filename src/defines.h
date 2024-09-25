@@ -24,7 +24,7 @@
 #ifndef _DEFINES_H
 #define _DEFINES_H
 
-//#define ENABLE_DEBUG  // enable serial debug
+// #define ENABLE_DEBUG  // enable serial debug
 
 typedef unsigned char byte;
 typedef unsigned long ulong;
@@ -33,10 +33,10 @@ typedef unsigned long ulong;
 
 /** Firmware version, hardware version, and maximal values */
 #define OS_FW_VERSION  219  // Firmware version: 219 means 2.1.9
-                            // if this number is different from the one stored in non-volatile memory
-                            // a device reset will be automatically triggered
+							// if this number is different from the one stored in non-volatile memory
+							// a device reset will be automatically triggered
 
-#define OS_FW_MINOR      3  // Firmware minor version
+#define OS_FW_MINOR      4  // Firmware minor version
 
 /** Hardware version base numbers */
 #define OS_HW_VERSION_BASE   0x00
@@ -66,15 +66,16 @@ typedef unsigned long ulong;
 #define STN_TYPE_HTTP        0x04	// HTTP station
 #define STN_TYPE_OTHER       0xFF
 
-/** IFTTT macro defines */
-#define IFTTT_PROGRAM_SCHED   0x01
-#define IFTTT_SENSOR1         0x02
-#define IFTTT_FLOWSENSOR      0x04
-#define IFTTT_WEATHER_UPDATE  0x08
-#define IFTTT_REBOOT          0x10
-#define IFTTT_STATION_RUN     0x20
-#define IFTTT_SENSOR2         0x40
-#define IFTTT_RAINDELAY				0x80
+/** Notification macro defines */
+#define NOTIFY_PROGRAM_SCHED   0x0001
+#define NOTIFY_SENSOR1         0x0002
+#define NOTIFY_FLOWSENSOR      0x0004
+#define NOTIFY_WEATHER_UPDATE  0x0008
+#define NOTIFY_REBOOT          0x0010
+#define NOTIFY_STATION_OFF     0x0020
+#define NOTIFY_SENSOR2         0x0040
+#define NOTIFY_RAINDELAY       0x0080
+#define NOTIFY_STATION_ON      0x0100
 
 /** HTTP request macro defines */
 #define HTTP_RQT_SUCCESS			 0
@@ -122,7 +123,7 @@ typedef unsigned long ulong;
 
 /** Storage / zone expander defines */
 #if defined(ARDUINO)
-	#define MAX_EXT_BOARDS    8  // maximum number of 8-zone expanders (each 16-zone expander counts as 2)
+	#define MAX_EXT_BOARDS    5  // maximum number of 8-zone expanders (each 16-zone expander counts as 2)
 #else
 	#define MAX_EXT_BOARDS		24 // allow more zones for linux-based firmwares
 #endif
@@ -219,12 +220,12 @@ enum {
 	SOPT_JAVASCRIPTURL,
 	SOPT_WEATHERURL,
 	SOPT_WEATHER_OPTS,
-	SOPT_IFTTT_KEY,
+	SOPT_IFTTT_KEY,	// todo: make this IFTTT config just like MQTT
 	SOPT_STA_SSID,
 	SOPT_STA_PASS,
+	SOPT_MQTT_OPTS,
 	//SOPT_WEATHER_KEY,
 	//SOPT_AP_PASS,
-	//SOPT_MQTT_IP,
 	NUM_SOPTS	// total number of string options
 };
 
@@ -302,7 +303,7 @@ enum {
 	#define PIN_FREE_LIST     {} // no free GPIO pin at the moment
 	#define ETHER_BUFFER_SIZE   8192
 
-	#define PIN_ETHER_CS       16 // ENC28J60 CS (chip select pin) is 16 on OS 3.2.
+	#define PIN_ETHER_CS       0 // ENC28J60 CS (chip select pin) is 16 on Hunter Wifi board.
 
 	/* To accommodate different OS30 versions, we use software defines pins */ 
 	extern byte PIN_BUTTON_1;
@@ -350,17 +351,43 @@ enum {
 
 	/* OS30 revision 2 pin defines */
 	// pins on PCA9555A IO expander have pin numbers IOEXP_PIN+i
+	// #define V2_IO_CONFIG         0x1F00 // config bits
+	// #define V2_IO_OUTPUT         0x1F00 // output bits
+	// #define V2_PIN_BUTTON_1      2 // button 1
+	// #define V2_PIN_BUTTON_2      0 // button 2
+	// #define V2_PIN_BUTTON_3      IOEXP_PIN+12 // button 3
+	// #define V2_PIN_RFTX          15
+	// #define V2_PIN_BOOST         IOEXP_PIN+13
+	// #define V2_PIN_BOOST_EN      IOEXP_PIN+14
+	// #define V2_PIN_LATCH_COM     IOEXP_PIN+15  
+	// #define V2_PIN_SENSOR1       3  // sensor 1
+	// #define V2_PIN_SENSOR2       10 // sensor 2
+
+	// Hunter mod using ESP8266 (Detect as OS3.2)
+	// GPIO 12, 13, 14, 16 reserved for SPI ethernet
+
+	#define FORCE_OS3V2			 1 // 0 to allow auto-detect, 1 to force 3.2 HW
+	#define ENABLE_ISENSE		 0
+	#define SHOW_SENSOR2		 0 // 1 to enable sensor 2 in UI (can use GPIO10)
+
 	#define V2_IO_CONFIG         0x1F00 // config bits
 	#define V2_IO_OUTPUT         0x1F00 // output bits
-	#define V2_PIN_BUTTON_1      2 // button 1
-	#define V2_PIN_BUTTON_2      0 // button 2
-	#define V2_PIN_BUTTON_3      IOEXP_PIN+12 // button 3
-	#define V2_PIN_RFTX          15
+	#define V2_PIN_BUTTON_1      15 // button 1 disabled
+	#define V2_PIN_BUTTON_2      255 // button 2 disabled
+	#define V2_PIN_BUTTON_3      255 // button 3 disabled
 	#define V2_PIN_BOOST         IOEXP_PIN+13
 	#define V2_PIN_BOOST_EN      IOEXP_PIN+14
-	#define V2_PIN_LATCH_COM     IOEXP_PIN+15  
-	#define V2_PIN_SENSOR1       3  // sensor 1
-	#define V2_PIN_SENSOR2       10 // sensor 2
+	#define V2_PIN_LATCH_COM     IOEXP_PIN+15
+	#define V2_PIN_SENSOR1       16  // sensor 1
+	#define V2_PIN_SENSOR2       255 // sensor 2
+
+	// Hunter PRO-C sensor is common-HIGH (pulldown), so use pulldown on GPIO16
+	#define SENSOR1_PINMODE      INPUT_PULLUP
+	#define SENSOR1_ACTIVE_LOW   1
+	#define SENSOR2_PINMODE      INPUT
+	#define SENSOR2_ACTIVE_LOW   1
+
+	#define HUNTER_REM_PIN       2 // UART1 Tx
 
 #elif defined(OSPI) // for OSPi
 
@@ -373,9 +400,9 @@ enum {
 	#define PIN_SENSOR1				14
 	#define PIN_SENSOR2				23
 	#define PIN_RFTX          15    // RF transmitter pin
-	#define PIN_BUTTON_1      23    // button 1
-	#define PIN_BUTTON_2      24    // button 2
-	#define PIN_BUTTON_3      25    // button 3
+	//#define PIN_BUTTON_1      23    // button 1
+	//#define PIN_BUTTON_2      24    // button 2
+	//#define PIN_BUTTON_3      25    // button 3
 
 	#define PIN_FREE_LIST		{5,6,7,8,9,10,11,12,13,16,18,19,20,21,23,24,25,26}  // free GPIO pins
 	#define ETHER_BUFFER_SIZE   16384
@@ -449,6 +476,7 @@ enum {
 	#define F(x)				 x
 	#define strcat_P     strcat
 	#define strcpy_P     strcpy
+	#define sprintf_P    sprintf
 	#include<string>
 	#define String       string
 	using namespace std;
@@ -488,5 +516,3 @@ enum {
 #define DISPLAY_MSG_MS      2000  // message display time (milliseconds)
 
 #endif  // _DEFINES_H
-
-

@@ -26,8 +26,8 @@
 #include "OpenSprinkler.h"
 #include "program.h"
 #include "weather.h"
-#include "server.h"
-#include "hunter.h"
+#include "os_server.h"
+#include "mqtt.h"
 
 #if defined(ARDUINO)
 	EthernetServer *m_server = NULL;
@@ -36,6 +36,7 @@
 	#if defined(ESP8266)
 		ESP8266WebServer *wifi_server = NULL;
 		static uint16_t led_blink_ms = LED_FAST_BLINK;
+		static unsigned long last_ntp_millis = 0;
 	#else
 		SdFat sd;																	// SD card object
 	#endif
@@ -47,19 +48,20 @@
 
 void reset_all_stations();
 void reset_all_stations_immediate();
-void push_message(uint8_t type, uint32_t lval=0, float fval=0.f);
-void manual_start_program(uint8_t, uint8_t);
+void push_message(int type, uint32_t lval=0, float fval=0.f, const char* sval=NULL);
+void manual_start_program(byte, byte);
 void remote_http_callback(char*);
 
 // Small variations have been added to the timing values below
 // to minimize conflicting events
-#define NTP_SYNC_INTERVAL				1440L 	// NYP sync interval, every 30 mins, expressed in seconds
+#define NTP_SYNC_INTERVAL				86413L 	    // NYP sync interval, in units of seconds
+#define NTP_SYNC_RETRY_INTERVAL         60          // Retry interval
 #define RTC_SYNC_INTERVAL				3607		// RTC sync interval, 3600 secs
-#define CHECK_NETWORK_INTERVAL	601			// Network checking timeout, 10 minutes
-#define CHECK_WEATHER_TIMEOUT		7207L		// Weather check interval: 2 hours
-#define CHECK_WEATHER_SUCCESS_TIMEOUT 86400L // Weather check success interval: 24 hrs
-#define LCD_BACKLIGHT_TIMEOUT		15			// LCD backlight timeout: 15 secs
-#define PING_TIMEOUT						200			// Ping test timeout: 200 ms
+#define CHECK_NETWORK_INTERVAL			601			// Network checking timeout, 10 minutes
+#define CHECK_WEATHER_TIMEOUT		    7207L		// Weather check interval: 2 hours
+#define CHECK_WEATHER_SUCCESS_TIMEOUT   86400L      // Weather check success interval: 24 hrs
+#define LCD_BACKLIGHT_TIMEOUT		    15			// LCD backlight timeout: 15 secs
+#define PING_TIMEOUT					200			// Ping test timeout: 200 ms
 
 // Define buffers: need them to be sufficiently large to cover string option reading
 char ether_buffer[ETHER_BUFFER_SIZE+TMP_BUFFER_SIZE]; // ethernet buffer
@@ -77,14 +79,14 @@ ProgramData pd;		// ProgramdData object
  * flow_last_gpm - last flow rate measured (averaged over flow_gallons) from last valve stopped (used to write to log file). */
 ulong flow_begin, flow_start, flow_stop, flow_gallons;
 ulong flow_count = 0;
-uint8_t prev_flow_state = HIGH;
+byte prev_flow_state = HIGH;
 float flow_last_gpm=0;
 
 void flow_poll() {
 	#if defined(ESP8266)
-	pinModeExt(PIN_SENSOR1, INPUT_PULLUP); // this seems necessary for OS 3.2 
+	pinModeExt(PIN_SENSOR1, SENSOR1_PINMODE); // this seems necessary for OS 3.2 
 	#endif
-	uint8_t curr_flow_state = digitalReadExt(PIN_SENSOR1);
+	byte curr_flow_state = digitalReadExt(PIN_SENSOR1);
 	if(!(prev_flow_state==HIGH && curr_flow_state==LOW)) {	// only record on falling edge
 		prev_flow_state = curr_flow_state;
 		return;
@@ -111,13 +113,13 @@ static char ui_anim_chars[3] = {'.', 'o', 'O'};
 #define UI_STATE_DISP_GW	 2
 #define UI_STATE_RUNPROG	 3
 
-static uint8_t ui_state = UI_STATE_DEFAULT;
-static uint8_t ui_state_runprog = 0;
+static byte ui_state = UI_STATE_DEFAULT;
+static byte ui_state_runprog = 0;
 
 bool ui_confirm(PGM_P str) {
 	os.lcd_print_line_clear_pgm(str, 0);
 	os.lcd_print_line_clear_pgm(PSTR("(B1:No, B3:Yes)"), 1);
-	uint8_t button;
+	byte button;
 	ulong timeout = millis()+4000;
 	do {
 		button = os.button_read(BUTTON_WAIT_NONE);
@@ -147,7 +149,7 @@ void ui_state_machine() {
 	}
 
 	// read button, if something is pressed, wait till release
-	uint8_t button = os.button_read(BUTTON_WAIT_HOLD);
+	byte button = os.button_read(BUTTON_WAIT_HOLD);
 
 	if (button & BUTTON_FLAG_DOWN) {	 // repond only to button down events
 		os.button_timeout = LCD_BACKLIGHT_TIMEOUT;
@@ -198,7 +200,7 @@ void ui_state_machine() {
 		case BUTTON_2:
 			if (button & BUTTON_FLAG_HOLD) {	// holding B2
 				if (digitalReadExt(PIN_BUTTON_1)==0) { // if B1 is pressed while holding B2, display external IP
-					os.lcd_print_ip((uint8_t*)(&os.nvdata.external_ip), 1);
+					os.lcd_print_ip((byte*)(&os.nvdata.external_ip), 1);
 					os.lcd.setCursor(0, 1);
 					os.lcd_print_pgm(PSTR("(eip)"));
 					ui_state = UI_STATE_DISP_IP;
@@ -214,7 +216,7 @@ void ui_state_machine() {
 				}
 			} else {	// clicking B2: display MAC
 				os.lcd.clear(0, 1);
-				uint8_t mac[6];
+				byte mac[6];
 				#if defined(ESP8266)
 				os.load_hardware_mac(mac, m_server!=NULL);
 				#else
@@ -298,9 +300,16 @@ void do_setup() {
 
 	pd.init();						// ProgramData init
 
-	setSyncInterval(RTC_SYNC_INTERVAL);  // RTC sync interval
-	// if rtc exists, sets it as time sync source
-	setSyncProvider(RTC.get);
+	// detect and check RTC type
+	if(!RTC.detect()) {
+		DEBUG_PRINTLN(F("RTC not found"));
+		setSyncProvider(NULL); //Use NTP; do not auto-sync
+	} else {
+		// if rtc exists, sets it as time sync source
+		setSyncProvider(RTC.get);
+		setSyncInterval(RTC_SYNC_INTERVAL);  // RTC sync interval
+	}
+
 	os.lcd_print_time(os.now_tz());  // display time to LCD
 	os.powerup_lasttime = os.now_tz();
 	
@@ -323,6 +332,9 @@ void do_setup() {
 	os.status.req_network = 0;
 	os.status.req_ntpsync = 1;
 
+	os.mqtt.init();
+	os.status.req_mqtt_restart = true;
+
 	os.apply_all_station_bits(); // reset station bits
 
 	os.button_timeout = LCD_BACKLIGHT_TIMEOUT;
@@ -332,7 +344,7 @@ void do_setup() {
 void(* sysReset) (void) = 0;
 
 #if !defined(ESP8266)
-volatile uint8_t wdt_timeout = 0;
+volatile byte wdt_timeout = 0;
 /** WDT interrupt service routine */
 ISR(WDT_vect)
 {
@@ -362,12 +374,16 @@ void do_setup() {
 		os.status.network_fails = 1;
 	}
 	os.status.req_network = 0;
+
+	os.mqtt.init();
+	os.status.req_mqtt_restart = true;
 }
 #endif
 
-void write_log(uint8_t type, ulong curr_time);
+void write_log(byte type, ulong curr_time);
 void schedule_all_stations(ulong curr_time);
-void turn_off_station(uint8_t sid, ulong curr_time);
+void turn_on_station(byte sid);
+void turn_off_station(byte sid, ulong curr_time);
 void process_dynamic_events(ulong curr_time);
 void check_network();
 void check_weather();
@@ -398,7 +414,7 @@ void do_loop()
 	static ulong last_time = 0;
 	static ulong last_minute = 0;
 
-	uint8_t bid, sid, s, pid, qid, bitvalue;
+	byte bid, sid, s, pid, qid, bitvalue;
 	ProgramStruct prog;
 
 	os.status.mas = os.iopts[IOPT_MASTER_STATION];
@@ -555,6 +571,13 @@ void do_loop()
 	}
 #endif	// Process Ethernet packets
 
+	// Start up MQTT when we have a network connection
+	if (os.status.req_mqtt_restart && os.network_connected()) {
+		os.mqtt.begin();
+		os.status.req_mqtt_restart = false;
+	}
+	os.mqtt.loop();
+
 	// The main control loop runs once every second
 	if (curr_time != last_time) {
 #if defined(ENABLE_DEBUG)
@@ -597,8 +620,14 @@ void do_loop()
 #endif
 
 		#if defined(ESP8266)
-		pinModeExt(PIN_SENSOR1, INPUT_PULLUP); // this seems necessary for OS 3.2
-		pinModeExt(PIN_SENSOR2, INPUT_PULLUP);
+		pinModeExt(PIN_SENSOR1, SENSOR1_PINMODE);
+		pinModeExt(PIN_SENSOR2, SENSOR2_PINMODE);
+
+		if(timeStatus() == timeNotSet) {
+			os.status.enabled = 0; // Disable until clock is valid
+		} else {
+			os.status.enabled = os.iopts[IOPT_DEVICE_ENABLE];
+		}
 		#endif
 		
 		last_time = curr_time;
@@ -631,11 +660,12 @@ void do_loop()
 			if (os.status.rain_delayed) {
 				// rain delay started, record time
 				os.raindelay_on_lasttime = curr_time;
-				push_message(IFTTT_RAINDELAY, LOGDATA_RAINDELAY, 1);
+				push_message(NOTIFY_RAINDELAY, LOGDATA_RAINDELAY, 1);
+
 			} else {
 				// rain delay stopped, write log
 				write_log(LOGDATA_RAINDELAY, curr_time);
-				push_message(IFTTT_RAINDELAY, LOGDATA_RAINDELAY, 0);
+				push_message(NOTIFY_RAINDELAY, LOGDATA_RAINDELAY, 0);
 			}
 			os.old_status.rain_delayed = os.status.rain_delayed;
 		}
@@ -647,10 +677,10 @@ void do_loop()
 			// send notification when sensor1 becomes active
 			if(os.status.sensor1_active) {
 				os.sensor1_active_lasttime = curr_time;
-				push_message(IFTTT_SENSOR1, LOGDATA_SENSOR1, 1);
+				push_message(NOTIFY_SENSOR1, LOGDATA_SENSOR1, 1);
 			} else {
 				write_log(LOGDATA_SENSOR1, curr_time);
-				push_message(IFTTT_SENSOR1, LOGDATA_SENSOR1, 0);			
+				push_message(NOTIFY_SENSOR1, LOGDATA_SENSOR1, 0);
 			}
 		}
 		os.old_status.sensor1_active = os.status.sensor1_active;
@@ -659,35 +689,16 @@ void do_loop()
 			// send notification when sensor1 becomes active
 			if(os.status.sensor2_active) {
 				os.sensor2_active_lasttime = curr_time;				
-				push_message(IFTTT_SENSOR2, LOGDATA_SENSOR2, 1);
+				push_message(NOTIFY_SENSOR2, LOGDATA_SENSOR2, 1);
 			} else {
 				write_log(LOGDATA_SENSOR2, curr_time);
-				push_message(IFTTT_SENSOR2, LOGDATA_SENSOR2, 0);
+				push_message(NOTIFY_SENSOR2, LOGDATA_SENSOR2, 0);
 			}
 		}
 		os.old_status.sensor2_active = os.status.sensor2_active;			
 
-    // ====== Check hunter_p sensor status ====== 3B
-    if (os.read_current() > 3000) {
-      os.status.hunter_p = 1;
-    } else {
-      os.status.hunter_p = 0;
-    }
-      if (os.old_status.hunter_p != os.status.hunter_p) {
-        if (curr_time>os.hunter_p_active_lasttime+5) {   // add a 5 second delay on status change
-          if (os.status.hunter_p) {
-            // hunter_p sensor on
-            os.hunter_p_active_lasttime = curr_time;
-          } else {
-            // hunter_p sensor off
-            os.hunter_p_active_lasttime = curr_time;
-            }
-        }
-        os.old_status.hunter_p = os.status.hunter_p;
-      }
-      
 		// ===== Check program switch status =====
-		uint8_t pswitch = os.detect_programswitch_status(curr_time);
+		byte pswitch = os.detect_programswitch_status(curr_time);
 		if(pswitch > 0) {
 			reset_all_stations_immediate(); // immediately stop all stations
 		}
@@ -727,7 +738,7 @@ void do_loop()
 							ulong water_time = water_time_resolve(prog.durations[sid]);
 							// if the program is set to use weather scaling
 							if (prog.use_weather) {
-								uint8_t wl = os.iopts[IOPT_WATER_PERCENTAGE];
+								byte wl = os.iopts[IOPT_WATER_PERCENTAGE];
 								water_time = water_time * wl / 100;
 								if (wl < 20 && water_time < 10) // if water_percentage is less than 20% and water_time is less than 10 seconds
 																								// do not water
@@ -750,7 +761,7 @@ void do_loop()
 							}// if water_time
 						}// if prog.durations[sid]
 					}// for sid
-					if(match_found) push_message(IFTTT_PROGRAM_SCHED, pid, prog.use_weather?os.iopts[IOPT_WATER_PERCENTAGE]:100);
+					if(match_found) push_message(NOTIFY_PROGRAM_SCHED, pid, prog.use_weather?os.iopts[IOPT_WATER_PERCENTAGE]:100);
 				}// if check_match
 			}// for pid
 
@@ -782,7 +793,7 @@ void do_loop()
 			qid=0;
 			for(;q<pd.queue+pd.nqueue;q++,qid++) {
 				sid=q->sid;
-				uint8_t sqi=pd.station_qid[sid];
+				byte sqi=pd.station_qid[sid];
 				// skip if station is already assigned a queue element
 				// and that queue element has an earlier start time
 				if(sqi<255 && pd.queue[sqi].st<q->st) continue;
@@ -793,7 +804,7 @@ void do_loop()
 			for(bid=0;bid<os.nboards; bid++) {
 				bitvalue = os.station_bits[bid];
 				for(s=0;s<8;s++) {
-					uint8_t sid = bid*8+s;
+					byte sid = bid*8+s;
 
 					// skip master station
 					if (os.status.mas == sid+1) continue;
@@ -811,14 +822,14 @@ void do_loop()
 					// if current station is not running, check if we should turn it on
 					if(!((bitvalue>>s)&1)) {
 						if (curr_time >= q->st && curr_time < q->st+q->dur) {
-
-							//turn_on_station(sid);
-							os.set_station_bit(sid, 1);
-              HunterStart(sid+1,round((q->dur/60)+0.5)); // Starts X-Core Hunter zone for 'dur' minutes +1
-
-							// RAH implementation of flow sensor
-							flow_start=0;
-
+							turn_on_station(sid);
+#if defined(HUNTER_REM_PIN)
+							if(q->dur % 60 == 0) {
+								os.hunter_runtimes[sid] = (uint8_t)(q->dur/60);
+							} else {
+								os.hunter_runtimes[sid] = (uint8_t)(q->dur/60)+1; //Round up to next minute
+							}
+#endif
 						} //if curr_time > scheduled_start_time
 					} // if current station is not running
 				}//end_s
@@ -842,7 +853,7 @@ void do_loop()
 			// check through runtime queue, calculate the last stop time of sequential stations
 			pd.last_seq_stop_time = 0;
 			ulong sst;
-			uint8_t re=os.iopts[IOPT_REMOTE_EXT_MODE];
+			byte re=os.iopts[IOPT_REMOTE_EXT_MODE];
 			q = pd.queue;
 			for(;q<pd.queue+pd.nqueue;q++) {
 				sid = q->sid;
@@ -872,7 +883,7 @@ void do_loop()
 				// log flow sensor reading if flow sensor is used
 				if(os.iopts[IOPT_SENSOR1_TYPE]==SENSOR_TYPE_FLOW) {
 					write_log(LOGDATA_FLOWSENSE, curr_time);
-					push_message(IFTTT_FLOWSENSOR, (flow_count>os.flowcount_log_start)?(flow_count-os.flowcount_log_start):0);
+					push_message(NOTIFY_FLOWSENSOR, (flow_count>os.flowcount_log_start)?(flow_count-os.flowcount_log_start):0);
 				}
 
 				// in case some options have changed while executing the program
@@ -885,7 +896,7 @@ void do_loop()
 		if (os.status.mas>0) {
 			int16_t mas_on_adj = water_time_decode_signed(os.iopts[IOPT_MASTER_ON_ADJ]);
 			int16_t mas_off_adj= water_time_decode_signed(os.iopts[IOPT_MASTER_OFF_ADJ]);
-			uint8_t masbit = 0;
+			byte masbit = 0;
 			
 			for(sid=0;sid<os.nstations;sid++) {
 				// skip if this is the master station
@@ -909,7 +920,7 @@ void do_loop()
 		if (os.status.mas2>0) {
 			int16_t mas_on_adj_2 = water_time_decode_signed(os.iopts[IOPT_MASTER_ON_ADJ_2]);
 			int16_t mas_off_adj_2= water_time_decode_signed(os.iopts[IOPT_MASTER_OFF_ADJ_2]);
-			uint8_t masbit2 = 0;
+			byte masbit2 = 0;
 			for(sid=0;sid<os.nstations;sid++) {
 				// skip if this is the master station
 				if (os.status.mas2 == sid+1) continue;
@@ -944,12 +955,10 @@ void do_loop()
 				os.lcd.setCursor(0, 2);
 				os.lcd.clear(2, 2);
 				if(os.status.program_busy) {
-					//os.lcd.print(F("curr: "));
-          os.lcd.print(F("A0: ")); // 3B => show mV on A0 from hunter P pin
+					os.lcd.print(F("curr: "));
 					uint16_t curr = os.read_current();
 					os.lcd.print(curr);
-					//os.lcd.print(F(" mA"));
-          os.lcd.print(F(" mV")); // 3B => show mV on A0 from hunter P pin
+					os.lcd.print(F(" mA"));
 				}
 			}
 			#endif
@@ -987,8 +996,11 @@ void do_loop()
 		// perform ntp sync
 		// instead of using curr_time, which may change due to NTP sync itself
 		// we use Arduino's millis() method
-		//if (curr_time % NTP_SYNC_INTERVAL == 0) os.status.req_ntpsync = 1;
-		if((millis()/1000) % NTP_SYNC_INTERVAL==0) os.status.req_ntpsync = 1;
+		unsigned long now_millis = millis();
+		if(now_millis - last_ntp_millis > NTP_SYNC_INTERVAL*1000) {
+			os.status.req_ntpsync = 1;
+			last_ntp_millis = now_millis;
+		}
 		perform_ntp_sync();
 
 		// check network connection
@@ -998,20 +1010,20 @@ void do_loop()
 		// check weather
 		check_weather();
 
-		uint8_t wuf = os.weather_update_flag;
+		byte wuf = os.weather_update_flag;
 		if(wuf) {
 			if((wuf&WEATHER_UPDATE_EIP) | (wuf&WEATHER_UPDATE_WL)) {
 				// at the moment, we only send notification if water level or external IP changed
 				// the other changes, such as sunrise, sunset changes are ignored for notification
-				push_message(IFTTT_WEATHER_UPDATE, (wuf&WEATHER_UPDATE_EIP)?os.nvdata.external_ip:0,
+				push_message(NOTIFY_WEATHER_UPDATE, (wuf&WEATHER_UPDATE_EIP)?os.nvdata.external_ip:0,
 																				 (wuf&WEATHER_UPDATE_WL)?os.iopts[IOPT_WATER_PERCENTAGE]:-1);
 			}
 			os.weather_update_flag = 0;
 		}
-		static uint8_t reboot_notification = 1;
+		static byte reboot_notification = 1;
 		if(reboot_notification) {
 			reboot_notification = 0;
-			push_message(IFTTT_REBOOT);
+			push_message(NOTIFY_REBOOT);
 		}
 
 	}
@@ -1054,15 +1066,29 @@ void check_weather() {
 	}
 }
 
+/** Turn on a station
+ * This function turns on a scheduled station
+ */
+void turn_on_station(byte sid) {
+	// RAH implementation of flow sensor
+	flow_start=0;
+
+	if (os.set_station_bit(sid, 1)) {
+		push_message(NOTIFY_STATION_ON, sid);
+	}
+}
+
 /** Turn off a station
  * This function turns off a scheduled station
  * and writes log record
  */
-void turn_off_station(uint8_t sid, ulong curr_time) {
+void turn_off_station(byte sid, ulong curr_time) {
 	os.set_station_bit(sid, 0);
-  HunterStop(sid+1); // Stops X-Core Hunter zones
+#if defined(HUNTER_REM_PIN)
+	os.hunter_runtimes[sid] = 0;
+#endif
 
-	uint8_t qid = pd.station_qid[sid];
+	byte qid = pd.station_qid[sid];
 	// ignore if we are turning off a station that's not running or scheduled to run
 	if (qid>=pd.nqueue)  return;
 
@@ -1087,7 +1113,7 @@ void turn_off_station(uint8_t sid, ulong curr_time) {
 
 			// log station run
 			write_log(LOGDATA_STATION, curr_time);
-			push_message(IFTTT_STATION_RUN, sid, pd.lastrun.duration);
+			push_message(NOTIFY_STATION_OFF, sid, pd.lastrun.duration);
 		}
 	}
 
@@ -1116,7 +1142,7 @@ void process_dynamic_events(ulong curr_time) {
 		sn2 = true;
 
 	// todo: handle sensor 2
-	uint8_t sid, s, bid, qid, igs, igs2, igrd;
+	byte sid, s, bid, qid, igs, igs2, igrd;
 	for(bid=0;bid<os.nboards;bid++) {
 		igs = os.attrib_igs[bid];
 		igs2= os.attrib_igs2[bid];
@@ -1161,14 +1187,14 @@ void schedule_all_stations(ulong curr_time) {
 	}
 
 	RuntimeQueueStruct *q = pd.queue;
-	uint8_t re = os.iopts[IOPT_REMOTE_EXT_MODE];
+	byte re = os.iopts[IOPT_REMOTE_EXT_MODE];
 	// go through runtime queue and calculate start time of each station
 	for(;q<pd.queue+pd.nqueue;q++) {
 		if(q->st) continue; // if this queue element has already been scheduled, skip
 		if(!q->dur) continue; // if the element has been marked to reset, skip
-		uint8_t sid=q->sid;
-		uint8_t bid=sid>>3;
-		uint8_t s=sid&0x07;
+		byte sid=q->sid;
+		byte bid=sid>>3;
+		byte s=sid&0x07;
 
 		// if this is a sequential station and the controller is not in remote extension mode
 		// use sequential scheduling. station delay time apples
@@ -1231,15 +1257,15 @@ void reset_all_stations() {
  * If pid==255, this is a short test program (2 second per station)
  * If pid > 0. run program pid-1
  */
-void manual_start_program(uint8_t pid, uint8_t uwt) {
+void manual_start_program(byte pid, byte uwt) {
 	boolean match_found = false;
 	reset_all_stations_immediate();
 	ProgramStruct prog;
 	ulong dur;
-	uint8_t sid, bid, s;
+	byte sid, bid, s;
 	if ((pid>0)&&(pid<255)) {
 		pd.read(pid-1, &prog);
-		push_message(IFTTT_PROGRAM_SCHED, pid-1, uwt?os.iopts[IOPT_WATER_PERCENTAGE]:100);
+		push_message(NOTIFY_PROGRAM_SCHED, pid-1, uwt?os.iopts[IOPT_WATER_PERCENTAGE]:100, "");
 	}
 	for(sid=0;sid<os.nstations;sid++) {
 		bid=sid>>3;
@@ -1273,145 +1299,193 @@ void manual_start_program(uint8_t pid, uint8_t uwt) {
 // ==========================================
 // ====== PUSH NOTIFICATION FUNCTIONS =======
 // ==========================================
-void ip2string(char* str, uint8_t ip[4]) {
-	for(uint8_t i=0;i<4;i++) {
-		itoa(ip[i], str+strlen(str), 10);
-		if(i!=3) strcat(str, ".");
-	}
+void ip2string(char* str, byte ip[4]) {
+	sprintf_P(str+strlen(str), PSTR("%d.%d.%d.%d"), ip[0], ip[1], ip[2], ip[3]);
 }
 
-void push_message(uint8_t type, uint32_t lval, float fval) {
-
-	static const char* host = DEFAULT_IFTTT_URL;
-	// prepare post message in tmp_buffer
+void push_message(int type, uint32_t lval, float fval, const char* sval) {
+	static char topic[TMP_BUFFER_SIZE];
+	static char payload[TMP_BUFFER_SIZE];
 	char* postval = tmp_buffer;
+	uint32_t volume;
+
+	bool ifttt_enabled = os.iopts[IOPT_IFTTT_ENABLE]&type;
 
 	// check if this type of event is enabled for push notification
-	if((os.iopts[IOPT_IFTTT_ENABLE]&type) == 0) return;
+	if (!ifttt_enabled && !os.mqtt.enabled())
+		return;
 
-	strcpy_P(postval, PSTR("{\"value1\":\""));
+	if (ifttt_enabled) {
+		strcpy_P(postval, PSTR("{\"value1\":\""));
+	}
+
+	if (os.mqtt.enabled()) {
+		topic[0] = 0;
+		payload[0] = 0;
+	}
 
 	switch(type) {
+		case  NOTIFY_STATION_ON:
 
-		case IFTTT_STATION_RUN:
-			
-			strcat_P(postval, PSTR("Station "));
-			os.get_station_name(lval, postval+strlen(postval));
-			strcat_P(postval, PSTR(" closed. It ran for "));
-			itoa((int)fval/60, postval+strlen(postval), 10);
-			strcat_P(postval, PSTR(" minutes "));
-			itoa((int)fval%60, postval+strlen(postval), 10);
-			strcat_P(postval, PSTR(" seconds."));
-			if(os.iopts[IOPT_SENSOR1_TYPE]==SENSOR_TYPE_FLOW) {
-				strcat_P(postval, PSTR(" Flow rate: "));
-				#if defined(ARDUINO)
-				dtostrf(flow_last_gpm,5,2,postval+strlen(postval));
-				#else
-				sprintf(postval+strlen(postval), "%5.2f", flow_last_gpm);
-				#endif
+			// todo: add IFTTT support for this event as well
+			if (os.mqtt.enabled()) {
+				sprintf_P(topic, PSTR("opensprinkler/station/%d"), lval);
+				strcpy_P(payload, PSTR("{\"state\":1}"));
 			}
 			break;
 
-		case IFTTT_PROGRAM_SCHED:
+		case NOTIFY_STATION_OFF:
 
-			strcat_P(postval, PSTR("Scheduled Program "));
-			{
-				ProgramStruct prog;
-				pd.read(lval, &prog);
-				if(lval<pd.nprograms) strcat(postval, prog.name);
-				else strcat_P(postval, PSTR("Manual"));
+			if (os.mqtt.enabled()) {
+				sprintf_P(topic, PSTR("opensprinkler/station/%d"), lval);
+				if (os.iopts[IOPT_SENSOR1_TYPE]==SENSOR_TYPE_FLOW) {
+					sprintf_P(payload, PSTR("{\"state\":0,\"duration\":%d,\"flow\":%d.%02d}"), (int)fval, (int)flow_last_gpm, (int)(flow_last_gpm*100)%100);
+				} else {
+					sprintf_P(payload, PSTR("{\"state\":0,\"duration\":%d}"), (int)fval);
+				}
 			}
-			strcat_P(postval, PSTR(" with "));
-			itoa((int)fval, postval+strlen(postval), 10);
-			strcat_P(postval, PSTR("% water level."));
+			if (ifttt_enabled) {
+				char name[STATION_NAME_SIZE];
+				os.get_station_name(lval, name);
+				sprintf_P(postval+strlen(postval), PSTR("Station %s closed. It ran for %d minutes %d seconds."), name, (int)fval/60, (int)fval%60);
+
+				if(os.iopts[IOPT_SENSOR1_TYPE]==SENSOR_TYPE_FLOW) {
+					sprintf_P(postval+strlen(postval), PSTR(" Flow rate: %d.%02d"), (int)flow_last_gpm, (int)(flow_last_gpm*100)%100);
+				}
+			}
 			break;
 
-		case IFTTT_SENSOR1:
+		case NOTIFY_PROGRAM_SCHED:
+
+			if (ifttt_enabled) {
+				if (sval) strcat_P(postval, PSTR("Manually scheduled "));
+				else strcat_P(postval, PSTR("Automatically scheduled "));
+				strcat_P(postval, PSTR("Program "));
+				{
+					ProgramStruct prog;
+					pd.read(lval, &prog);
+					if(lval<pd.nprograms) strcat(postval, prog.name);
+				}
+				sprintf_P(postval+strlen(postval), PSTR(" with %d%% water level."), (int)fval);
+			}
+			break;
+
+		case NOTIFY_SENSOR1:
+
+			if (os.mqtt.enabled()) {
+				strcpy_P(topic, PSTR("opensprinkler/sensor1"));
+				sprintf_P(payload, PSTR("{\"state\":%d}"), (int)fval);
+			}
+			if (ifttt_enabled) {
+				strcat_P(postval, PSTR("Sensor 1 "));
+				strcat_P(postval, ((int)fval)?PSTR("activated."):PSTR("de-activated."));
+			}
+			break;
 			
-			strcat_P(postval, PSTR("Sensor 1 "));
-			strcat_P(postval, ((int)fval)?PSTR("activated."):PSTR("de-activated"));
-			break;
-			
-		case IFTTT_SENSOR2:
+		case NOTIFY_SENSOR2:
 
-			strcat_P(postval, PSTR("Sensor 2 "));
-			strcat_P(postval, ((int)fval)?PSTR("activated."):PSTR("de-activated"));
+			if (os.mqtt.enabled()) {
+				strcpy_P(topic, PSTR("opensprinkler/sensor2"));
+				sprintf_P(payload, PSTR("{\"state\":%d}"), (int)fval);
+			}
+			if (ifttt_enabled) {
+				strcat_P(postval, PSTR("Sensor 2 "));
+				strcat_P(postval, ((int)fval)?PSTR("activated."):PSTR("de-activated."));
+			}
 			break;
 
-		case IFTTT_RAINDELAY:
+		case NOTIFY_RAINDELAY:
 
-			strcat_P(postval, PSTR("Rain delay "));
-			strcat_P(postval, ((int)fval)?PSTR("activated."):PSTR("de-activated"));
+			if (os.mqtt.enabled()) {
+				strcpy_P(topic, PSTR("opensprinkler/raindelay"));
+				sprintf_P(payload, PSTR("{\"state\":%d}"), (int)fval);
+			}
+			if (ifttt_enabled) {
+				strcat_P(postval, PSTR("Rain delay "));
+				strcat_P(postval, ((int)fval)?PSTR("activated."):PSTR("de-activated."));
+			}
 			break;
-						
-		case IFTTT_FLOWSENSOR:
-			strcat_P(postval, PSTR("Flow count: "));
-			itoa(lval, postval+strlen(postval), 10);
-			strcat_P(postval, PSTR(", volume: "));
-			{
-			uint32_t volume = os.iopts[IOPT_PULSE_RATE_1];
+
+		case NOTIFY_FLOWSENSOR:
+
+			volume = os.iopts[IOPT_PULSE_RATE_1];
 			volume = (volume<<8)+os.iopts[IOPT_PULSE_RATE_0];
 			volume = lval*volume;
-			itoa(volume/100, postval+strlen(postval), 10);
-			strcat(postval, ".");
-			itoa(volume%100, postval+strlen(postval), 10);
+			if (os.mqtt.enabled()) {
+				strcpy_P(topic, PSTR("opensprinkler/sensor/flow"));
+				sprintf_P(payload, PSTR("{\"count\":%d,\"volume\":%d.%02d}"), lval, (int)volume/100, (int)volume%100);
+			}
+			if (ifttt_enabled) {
+				sprintf_P(postval+strlen(postval), PSTR("Flow count: %d, volume: %d.%02d"), lval, (int)volume/100, (int)volume%100);
 			}
 			break;
 
-		case IFTTT_WEATHER_UPDATE:
-			if(lval>0) {
-				strcat_P(postval, PSTR("External IP updated: "));
-				uint8_t ip[4] = {(uint8_t)((lval>>24)&0xFF),
-											(uint8_t)((lval>>16)&0xFF),
-											(uint8_t)((lval>>8)&0xFF),
-											(uint8_t)(lval&0xFF)};
-				ip2string(postval, ip);
-			}
-			if(fval>=0) {
-				strcat_P(postval, PSTR("Water level updated: "));
-				itoa((int)fval, postval+strlen(postval), 10);
-				strcat_P(postval, PSTR("%."));
-			}
-				
-			break;
+		case NOTIFY_WEATHER_UPDATE:
 
-		case IFTTT_REBOOT:
-			#if defined(ARDUINO)
-				strcat_P(postval, PSTR("Rebooted. Device IP: "));
-				#if defined(ESP8266)
-				{
-					IPAddress _ip;
-					if (m_server) {
-						_ip = Ethernet.localIP();
-					} else {
-						_ip = WiFi.localIP();
-					}
-					uint8_t ip[4] = {_ip[0], _ip[1], _ip[2], _ip[3]};
+			if (ifttt_enabled) {
+				if(lval>0) {
+					strcat_P(postval, PSTR("External IP updated: "));
+					byte ip[4] = {(byte)((lval>>24)&0xFF),
+									(byte)((lval>>16)&0xFF),
+									(byte)((lval>>8)&0xFF),
+									(byte)(lval&0xFF)};
 					ip2string(postval, ip);
 				}
+				if(fval>=0) {
+					sprintf_P(postval+strlen(postval), PSTR("Water level updated: %d%%."), (int)fval);
+				}
+			}
+			break;
+
+		case NOTIFY_REBOOT:
+			
+			if (os.mqtt.enabled()) {
+				strcpy_P(topic, PSTR("opensprinkler/system"));
+				strcpy_P(payload, PSTR("{\"state\":\"started\"}"));
+			}
+			if (ifttt_enabled) {
+				#if defined(ARDUINO)
+					strcat_P(postval, PSTR("Rebooted. Device IP: "));
+					#if defined(ESP8266)
+					{
+						IPAddress _ip;
+						if (m_server) {
+							_ip = Ethernet.localIP();
+						} else {
+							_ip = WiFi.localIP();
+						}
+						byte ip[4] = {_ip[0], _ip[1], _ip[2], _ip[3]};
+						ip2string(postval, ip);
+					}
+					#else
+						ip2string(postval, &(Ethernet.localIP()[0]));
+					#endif
+					//strcat(postval, ":");
+					//itoa(_port, postval+strlen(postval), 10);
 				#else
-				ip2string(postval, &(Ethernet.localIP()[0]));
+					strcat_P(postval, PSTR("Process restarted."));
 				#endif
-				//strcat(postval, ":");
-				//itoa(_port, postval+strlen(postval), 10);
-			#else
-				strcat_P(postval, PSTR("Process restarted."));
-			#endif
+			}
 			break;
 	}
 
-	strcat_P(postval, PSTR("\"}"));
+	if (os.mqtt.enabled() && strlen(topic) && strlen(payload))
+		os.mqtt.publish(topic, payload);
 
-	//char postBuffer[1500];
-	BufferFiller bf = ether_buffer;
-	bf.emit_p(PSTR("POST /trigger/sprinkler/with/key/$O HTTP/1.0\r\n"
-								 "Host: $S\r\n"
-								 "Accept: */*\r\n"
-								 "Content-Length: $D\r\n"
-								 "Content-Type: application/json\r\n\r\n$S"),
-								 SOPT_IFTTT_KEY, host, strlen(postval), postval);
+	if (ifttt_enabled) {
+		strcat_P(postval, PSTR("\"}"));
 
-	os.send_http_request(host, 80, ether_buffer, remote_http_callback);
+		//char postBuffer[1500];
+		BufferFiller bf = ether_buffer;
+		bf.emit_p(PSTR("POST /trigger/sprinkler/with/key/$O HTTP/1.0\r\n"
+						"Host: $S\r\n"
+						"Accept: */*\r\n"
+						"Content-Length: $D\r\n"
+						"Content-Type: application/json\r\n\r\n$S"),
+						SOPT_IFTTT_KEY, DEFAULT_IFTTT_URL, strlen(postval), postval);
+
+		os.send_http_request(DEFAULT_IFTTT_URL, 80, ether_buffer, remote_http_callback);
+	}
 }
 
 // ================================
@@ -1453,7 +1527,7 @@ static const char log_type_names[] PROGMEM =
 	"cu\0";
 
 /** write run record to log on SD card */
-void write_log(uint8_t type, ulong curr_time) {
+void write_log(byte type, ulong curr_time) {
 
 	if (!os.iopts[IOPT_ENABLE_LOGGING]) return;
 
@@ -1558,7 +1632,7 @@ void write_log(uint8_t type, ulong curr_time) {
 
 #if defined(ARDUINO)
 	#if defined(ESP8266)
-	file.write((uint8_t*)tmp_buffer, strlen(tmp_buffer));
+	file.write((byte*)tmp_buffer, strlen(tmp_buffer));
 	#else
 	file.write(tmp_buffer);
 	#endif
@@ -1689,8 +1763,10 @@ void perform_ntp_sync() {
 	if (os.status.req_ntpsync) {
 		// check if rtc is uninitialized
 		// 978307200 is Jan 1, 2001, 00:00:00
+		#if !defined(ESP8266)
 		boolean rtc_zero = (now()<=978307200L);
-		
+		#endif
+
 		os.status.req_ntpsync = 0;
 		if (!ui_state) {
 			os.lcd_print_line_clear_pgm(PSTR("NTP Syncing..."),1);
@@ -1709,6 +1785,10 @@ void perform_ntp_sync() {
 			last_ntp_result = t;
 		}
 		if (t>0) {
+			if(timeStatus() == timeNotSet) {
+				os.sensor_resetall(); // Force sensor refresh
+			}
+
 			setTime(t);
 			RTC.set(t);
 			DEBUG_PRINTLN(RTC.get());
@@ -1718,6 +1798,9 @@ void perform_ntp_sync() {
 				os.reboot_dev(REBOOT_CAUSE_NTP);
 			}
 			#endif
+		} else if(timeStatus() == timeNotSet) { // If time has not been set, retry soon
+			DEBUG_PRINTLN(F("Retry..."));
+			last_ntp_millis = millis() - (NTP_SYNC_INTERVAL*1000) + (NTP_SYNC_RETRY_INTERVAL*1000);
 		}
 	}
 #else

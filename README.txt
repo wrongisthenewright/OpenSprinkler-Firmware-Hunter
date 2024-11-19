@@ -13,10 +13,15 @@ https://github.com/ecodina/hunter-wifi
 It works correctly with an Hunter X-Core 6 station controller, it should work with any Hunter controller with REM port.
 
 
-Just a memo for myself, to build and flash the wemos do:
+Just a memo for myself, to build and flash the wemos do (updated after new Ubuntu 24.04 upgrade of my laptop: 
 
+
+alias get_pio='source ~/.platformio/penv/bin/activate'
+git clone xxxx
+cd xxxx
 sudo chmod 666 /dev/ttyUSB0
 esptool.py --port /dev/ttyUSB0 erase_flash
+get_pio
 pio run -v  -t upload 
 
 
